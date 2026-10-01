@@ -1,0 +1,164 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <memory>
+
+struct Transaction {
+    double amount;
+    std::string currency;
+    std::string description;
+    double tax;
+};
+
+class IObserver {
+public:
+    virtual ~IObserver() = default;
+    virtual void update(const Transaction& t) = 0;
+};
+
+class ConsoleLogger : public IObserver {
+public:
+    void update(const Transaction& t) override {
+        std::cout << "  [ConsoleLogger] Nova tranzakciya: " << t.amount << " " << t.currency
+            << " | Podatok: " << t.tax << " " << t.currency << "\n";
+    }
+};
+
+class EmailNotifier : public IObserver {
+public:
+    void update(const Transaction& t) override {
+        std::cout << "  [EmailNotifier] Vidpravka lysta pro tranzakciyu na sumu "
+            << t.amount << " " << t.currency << "\n";
+    }
+};
+
+class ITaxStrategy {
+public:
+    virtual ~ITaxStrategy() = default;
+    virtual double calculateTax(double amount) = 0;
+};
+
+class StandardTaxStrategy : public ITaxStrategy {
+public:
+    double calculateTax(double amount) override {
+        return amount * 0.20;
+    }
+};
+
+class ITTaxStrategy : public ITaxStrategy {
+public:
+    double calculateTax(double amount) override {
+        return amount * 0.05;
+    }
+};
+
+class IMessageProcessor {
+public:
+    virtual ~IMessageProcessor() = default;
+    virtual std::string process(const std::string& msg) = 0;
+};
+
+class BasicProcessor : public IMessageProcessor {
+public:
+    std::string process(const std::string& msg) override {
+        return msg;
+    }
+};
+
+class EncryptionDecorator : public IMessageProcessor {
+    std::shared_ptr<IMessageProcessor> processor;
+public:
+    EncryptionDecorator(std::shared_ptr<IMessageProcessor> proc) : processor(proc) {}
+    std::string process(const std::string& msg) override {
+        return "[ENCRYPTED(" + processor->process(msg) + ")]";
+    }
+};
+
+class LoggingDecorator : public IMessageProcessor {
+    std::shared_ptr<IMessageProcessor> processor;
+public:
+    LoggingDecorator(std::shared_ptr<IMessageProcessor> proc) : processor(proc) {}
+    std::string process(const std::string& msg) override {
+        return "[LOGGED: " + processor->process(msg) + "]";
+    }
+};
+
+class TransactionModel {
+    std::vector<Transaction> transactions;
+    std::vector<std::shared_ptr<IObserver>> observers;
+public:
+    void attach(std::shared_ptr<IObserver> obs) {
+        observers.push_back(obs);
+    }
+
+    void notify(const Transaction& t) {
+        for (auto& obs : observers) {
+            obs->update(t);
+        }
+    }
+
+    void addTransaction(const Transaction& t) {
+        transactions.push_back(t);
+        notify(t);
+    }
+};
+
+class TransactionController {
+    TransactionModel& model;
+    std::unique_ptr<ITaxStrategy> strategy;
+public:
+    TransactionController(TransactionModel& m, std::unique_ptr<ITaxStrategy> strat)
+        : model(m), strategy(std::move(strat)) {
+    }
+
+    void setStrategy(std::unique_ptr<ITaxStrategy> newStrat) {
+        strategy = std::move(newStrat);
+    }
+
+    void addTransaction(double amount, const std::string& currency, const std::string& desc) {
+        double tax = strategy->calculateTax(amount);
+        Transaction t{ amount, currency, desc, tax };
+        model.addTransaction(t);
+    }
+};
+
+int main() {
+    std::cout << "==================================================\n";
+    std::cout << "       ZAPUSK SYSTEMY OBROBKY TRANZAKCII          \n";
+    std::cout << "==================================================\n\n";
+
+    TransactionModel model;
+    model.attach(std::make_shared<ConsoleLogger>());
+    model.attach(std::make_shared<EmailNotifier>());
+
+    TransactionController controller(model, std::make_unique<StandardTaxStrategy>());
+
+    std::cout << ">>> 1. Stvorennya tranzakcii (Standartna strategiya podatku 20%):\n";
+    controller.addTransaction(1000.0, "USD", "Pokupka obladnannya");
+
+    std::cout << "\n--------------------------------------------------\n";
+
+    std::cout << ">>> 2. Zmina strategii rozrahunku podatku na ITTaxStrategy (5%)...\n";
+    controller.setStrategy(std::make_unique<ITTaxStrategy>());
+
+    std::cout << ">>> Stvorennya novoi tranzakcii z novoyu strategiyeyu:\n";
+    controller.addTransaction(1000.0, "USD", "Oplata poslug rozrobky");
+
+    std::cout << "\n--------------------------------------------------\n";
+
+    std::cout << ">>> 3. Obrobka log-povidomlennya cherez pattern Decorator:\n";
+
+    std::shared_ptr<IMessageProcessor> processor = std::make_shared<BasicProcessor>();
+    processor = std::make_shared<EncryptionDecorator>(processor);
+    processor = std::make_shared<LoggingDecorator>(processor);
+
+    std::string rawMessage = "Transaction_ID_1002_SUCCESS";
+    std::cout << "  Originalne povidomlennya: " << rawMessage << "\n";
+    std::cout << "  Rezultat dekoratora:     " << processor->process(rawMessage) << "\n";
+
+    std::cout << "\n==================================================\n";
+    std::cout << "                USPESHNE VYKONANNYA               \n";
+    std::cout << "==================================================\n";
+
+    return 0;
+}
